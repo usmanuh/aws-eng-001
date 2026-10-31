@@ -1,0 +1,327 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Email & Domain Health Checker</title>
+  <style>
+    :root {
+      font-family: Arial, sans-serif;
+      color: #172334;
+      background: #f4f6f9;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 20px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+
+    h1 {
+      font-size: clamp(28px, 5vw, 40px);
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+
+    .subtitle {
+      color: #526174;
+      max-width: 650px;
+      margin: 0 auto;
+    }
+
+    .search-panel, .result-card {
+      background: white;
+      border: 1px solid #e0e5ec;
+      border-radius: 12px;
+      padding: 26px;
+    }
+
+    .search-panel {
+      box-shadow: 0 6px 24px rgba(0,0,0,.04);
+    }
+
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+
+    .search-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    input {
+      flex: 1;
+      min-width: 0;
+      padding: 14px;
+      font-size: 16px;
+      border: 1px solid #bcc6d3;
+      border-radius: 7px;
+    }
+
+    input:focus-visible, button:focus-visible {
+      outline: 3px solid #93c5fd;
+      outline-offset: 2px;
+    }
+
+    button {
+      padding: 14px 22px;
+      background: #1457c5;
+      color: white;
+      border: 0;
+      border-radius: 7px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    button:hover { background: #1046a0; }
+    button:disabled { opacity: .6; cursor: wait; }
+
+    .notice {
+      margin-top: 16px;
+      color: #526174;
+    }
+
+    .error { color: #b42318; }
+
+    #results {
+      margin-top: 32px;
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .result-card h3 {
+      margin: 0 0 12px;
+      font-size: 21px;
+    }
+
+    .status {
+      display: inline-block;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 13px;
+      font-weight: bold;
+      margin-bottom: 14px;
+    }
+
+    .status-pass { background: #dcfce7; color: #166534; }
+    .status-warning { background: #fef3c7; color: #92400e; }
+    .status-fail { background: #fee2e2; color: #991b1b; }
+    .status-info { background: #dbeafe; color: #1e40af; }
+
+    .record {
+      background: #f4f6f9;
+      border-radius: 6px;
+      padding: 10px;
+      overflow-wrap: anywhere;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      margin: 8px 0;
+    }
+
+    .recommendation {
+      border-top: 1px solid #e0e5ec;
+      padding-top: 14px;
+      margin-top: 18px;
+    }
+
+    .recommendation strong { display: block; }
+
+    .disclaimer {
+      font-size: 13px;
+      color: #66758a;
+      margin-top: 26px;
+    }
+
+    [hidden] { display: none !important; }
+
+    @media (max-width: 750px) {
+      .results-grid { grid-template-columns: 1fr; }
+      .search-row { flex-direction: column; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>Email & Domain Health Checker</h1>
+      <p class="subtitle">
+        Check your domain's email DNS configuration.
+        Review MX, SPF and DMARC records, understand potential
+        issues and see recommended next steps.
+      </p>
+    </header>
+
+    <section class="search-panel">
+      <form id="check-form">
+        <label for="domain">Enter your domain name</label>
+        <div class="search-row">
+          <input
+            id="domain"
+            name="domain"
+            type="text"
+            placeholder="example.com"
+            maxlength="253"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          >
+          <button id="check-button" type="submit">
+            Check Domain
+          </button>
+        </div>
+      </form>
+      <p id="message" class="notice" role="status" aria-live="polite">
+        Enter a domain to begin.
+      </p>
+    </section>
+
+    <section id="results" hidden aria-live="polite">
+      <h2 id="results-title"></h2>
+      <div id="results-grid" class="results-grid"></div>
+      <p class="disclaimer">
+        This is a basic DNS configuration assessment, not a complete
+        email security audit or guarantee of email deliverability.
+        Record presence does not establish that all sending services
+        are configured correctly.
+      </p>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("check-form");
+    const domainInput = document.getElementById("domain");
+    const button = document.getElementById("check-button");
+    const message = document.getElementById("message");
+    const results = document.getElementById("results");
+    const resultsTitle = document.getElementById("results-title");
+    const resultsGrid = document.getElementById("results-grid");
+
+    const checks = [
+      { key: "mx", title: "MX Records" },
+      { key: "spf", title: "SPF Policy" },
+      { key: "dmarc", title: "DMARC Policy" }
+    ];
+
+    const statusLabels = {
+      pass: "Basic check passed",
+      warning: "Needs attention",
+      fail: "Issue detected",
+      info: "Information"
+    };
+
+    function makeElement(tag, className, value) {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      if (value !== undefined) element.textContent = value;
+      return element;
+    }
+
+    function displayCheck(check, data) {
+      const card = makeElement("article", "result-card");
+      card.appendChild(makeElement("h3", "", check.title));
+
+      const status = Object.hasOwn(statusLabels, data.status)
+        ? data.status : "info";
+
+      card.appendChild(
+        makeElement(
+          "span",
+          "status status-" + status,
+          statusLabels[status]
+        )
+      );
+
+      card.appendChild(makeElement("p", "", data.message));
+
+      const records = Array.isArray(data.records) ? data.records : [];
+
+      for (const record of records) {
+        const value = typeof record === "string"
+          ? record
+          : `Priority ${record.priority}: ${record.server}`;
+
+        card.appendChild(makeElement("div", "record", value));
+      }
+
+      const recommendation = makeElement("div", "recommendation");
+      recommendation.appendChild(
+        makeElement("strong", "", "Recommendation")
+      );
+      recommendation.appendChild(
+        makeElement("p", "", data.recommendation)
+      );
+      card.appendChild(recommendation);
+
+      return card;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const domain = domainInput.value.trim().toLowerCase();
+      if (!domain) return;
+
+      button.disabled = true;
+      button.textContent = "Checking...";
+      message.className = "notice";
+      message.textContent = "Checking DNS records. Please wait...";
+      results.hidden = true;
+      resultsGrid.replaceChildren();
+
+      try {
+        const response = await fetch(
+          "/check?domain=" + encodeURIComponent(domain),
+          { headers: { "Accept": "application/json" } }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.detail || "Unable to check this domain.");
+        }
+
+        resultsTitle.textContent = "Results for " + data.domain;
+
+        for (const check of checks) {
+          resultsGrid.appendChild(
+            displayCheck(check, data[check.key])
+          );
+        }
+
+        results.hidden = false;
+        message.textContent = "Assessment completed.";
+      } catch (error) {
+        message.className = "notice error";
+        message.textContent =
+          error instanceof Error
+            ? error.message
+            : "An unexpected error occurred.";
+      } finally {
+        button.disabled = false;
+        button.textContent = "Check Domain";
+      }
+    });
+  </script>
+</body>
+</html>
